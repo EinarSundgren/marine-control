@@ -2,27 +2,46 @@
 #include <EEPROM.h>
 #include <avr/eeprom.h>
 
-#define NUMBER_OF_TIMINGS 50
+#define NUMBER_OF_TIMINGS 0xF
 #define WARNING_INTERVAL 0.8
-#define DELAY_CYCLE_MS 120000 //Store the info each 2 minutes.
+#define DELAY_CYCLE_MS 6000 //Store the info each minute.
 #define DELAY_CYCLE_MINS DELAY_CYCLE_MS/1000/60
 #define MINUTES_PER_HOUR 60
 #define HIGH_CHECKSUM_ADRESS 500
 #define LOW_CHECKSUM_ADRESS 1000
 
+#define ESCAPE 0xFE
+#define START_OF_FRAME 0xFF
+
 #define START_SAVE_ADRESS 0
-#define UPPER_OFFSET 512
+//#define UPPER_OFFSET 512
+
+#define MSG_FULL_TIMER_FEFRESH 0x01
 
 #define PIN_INTERNAL_LED 13
 #define PIN_VOLTAGE_SENSE 3
 
-#define DEBUG 1
+#define ID_INTERFACE 0x00
+#define ID_TIMER 0x10
+
+#define DEBUG 0
 
 /*
 Defines of lsb and msb for reading and writing to EEPROM and serial.
 */
 #define lowByte(w) ((uint8_t) ((w) & 0xff))
 #define highByte(w) ((uint8_t) ((w) >> 8))
+
+  typedef union {
+    float floatingPoint;
+    byte binary[4];
+  } binaryFloat;
+
+  typedef union {
+    uint16_t integer;
+    byte binary[4];
+  } binaryInteger;
+
 
   typedef struct ll{  
     uint16_t runTime; //In minutes since last reset
@@ -39,32 +58,35 @@ Defines of lsb and msb for reading and writing to EEPROM and serial.
   //uint16_t * save_adress = START_SAVE_ADRESS
   uint8_t eeprom_checksum;
 
+  binaryInteger runTime; //In minutes since last reset
+  binaryInteger stopTime; //In minutes
+
+
 /*
   Function declarations
 */
 void setup();
 void change_timing(uint16_t id, uint16_t runTime, uint16_t stopTime);
-void save_timing_to_eeprom(uint16_t adress, uint16_t runtime, uint16_t stopTime);
-void read_state_from_eeprom(); // No params since there is limited possibilities
+void save_timings_to_eeprom(uint16_t * adress, TIMING * input);
+void read_state_from_eeprom(uint16_t * adress); 
 byte calc_parity_value(TIMING * input);
 
+void mcProxySend(binaryInteger bi);
+void mcProxySend(binaryFloat bf);
+void mcProxySend(byte bb);
+
+void power_off();
 
 int main(void) {
 init();
 setup();
 
 
+ // Just temp before we can calculate it properly.
+byte crc = 0x02;
+
 while(true) {
   
-  /*
-    Alternate between upper and lower eeprom memory 
-    areas to protect from brown outs.
-  */
-  if (write_to_upper) {
-    write_to_upper = false;
-  } else {
-    write_to_upper = true;
-  }
 
   current = timings;
   doService = false;
@@ -81,21 +103,13 @@ while(true) {
   }
   */
   delay(DELAY_CYCLE_MS-accumDelay);
+  
 
   for (int i = 0; i < NUMBER_OF_TIMINGS; i ++){
-    Serial.print(i);
+    // Serial.print(i);
     current = &timings[i];
     current->runTime += DELAY_CYCLE_MINS;
 
-    /*
-        Alterate between memory areas
-    */
-    //if (write_to_upper){
-     // save_timing_to_eeprom((i*4) + UPPER_OFFSET, current->currTime, current->stopTime);
-    save_timing_to_eeprom((uint16_t *) (i*5), current);
-    //} else {
-      
-    //}
 
     #if 0
       Serial.write (" Current:");
@@ -103,6 +117,25 @@ while(true) {
       Serial.write (" Stop:");
       Serial.print (current->stopTime);
       Serial.write ("\n");
+    # else
+
+      runTime.integer = current->runTime;
+      stopTime.integer = current->stopTime;
+
+      Serial.write((byte)START_OF_FRAME); //Start of frame
+      byte fromAddress;
+      byte toAddress;
+      fromAddress = i | ID_TIMER;
+      toAddress = 0 | ID_INTERFACE;
+      mcProxySend(toAddress); // To ID first interface
+      mcProxySend(fromAddress); // From ID first timer
+      mcProxySend(MSG_FULL_TIMER_FEFRESH); // Message type
+      mcProxySend(sizeof(runTime.binary) + sizeof(stopTime.binary)); // 32 dec Bytes in payload
+      mcProxySend(runTime); // Payload 2 first bytes
+      mcProxySend(stopTime); // Payload 2 second bytes
+      mcProxySend(crc);
+      mcProxySend(crc);
+
     #endif
 
     if (current->runTime >= current->stopTime) {
@@ -142,10 +175,10 @@ while(true) {
     delay(300);              // wait for a second
     digitalWrite(13, LOW);    // set the LED off
     delay(1000);             // wait for a second
-    Serial.write("Plan service \n");
+    // Serial.write("Plan service \n");
     accumDelay = 1900;
   } else {
-    Serial.write("All clear \n");
+    // Serial.write("All clear \n");
     accumDelay = 0;
   }
 
@@ -163,14 +196,14 @@ while(true) {
 }
 
   void setup() {         
-  pinMode(PIN_INTERNAL_LED, OUTPUT);
-  pinMode(PIN_VOLTAGE_SENSE, INPUT);
+    pinMode(PIN_INTERNAL_LED, OUTPUT);
+    pinMode(PIN_VOLTAGE_SENSE, INPUT);
 
-  // Set the interrupt for voltage drop on the optocoupler
-  attachInterrupt(PIN_VOLTAGE_SENSE, falling, FALLING);
-  Serial.begin(9600);
+    // Set the interrupt for voltage drop on the optocoupler
+    attachInterrupt(1, power_off, FALLING);
+    Serial.begin(115200);
 
-  // Just temporary initialization
+    //Just temporary initialization
   
   #if 0
   for (int i = 0; i < NUMBER_OF_TIMINGS; i ++) {
@@ -179,7 +212,7 @@ while(true) {
     current->stopTime = (100*MINUTES_PER_HOUR)+i; // 100 hours
   }
   #else
-  read_state_from_eeprom((uint16_t*) START_SAVE_ADRESS);
+    read_state_from_eeprom((uint16_t*) START_SAVE_ADRESS);
   #endif
   }
 
@@ -188,11 +221,15 @@ while(true) {
     timings[id].stopTime = stopTime;
   }
 
-  void save_timing_to_eeprom(uint16_t * adress, TIMING * input) {
-    
+  void save_timings_to_eeprom(uint16_t * adress, TIMING * input) {
+    for (int i = 0; i < NUMBER_OF_TIMINGS; i ++){
+     
+     adress = (uint16_t *) (i*5);
      eeprom_write_word(adress, input->runTime);
      eeprom_write_word(adress+1, input->stopTime);
      eeprom_write_byte((uint8_t*) (adress+2), calc_parity_value(input));
+    
+     /*
      Serial.write("Saved ");
      Serial.print(eeprom_read_word(adress));
      Serial.write(" as runtime at adress ");
@@ -202,6 +239,9 @@ while(true) {
      Serial.write(" as stoptime at adress ");
      Serial.print((int) (adress +1));
      Serial.write(" \n");
+     */
+     input ++;
+   }
   }
 
   void read_state_from_eeprom(uint16_t * adress) {
@@ -209,6 +249,7 @@ while(true) {
       adress = (uint16_t *) (i*5);
       timings[i].runTime = eeprom_read_word (adress);
       timings[i].stopTime = eeprom_read_word (adress+1);
+      #if DEBUG
       Serial.write("Read ");
       Serial.print(timings[i].runTime);
       Serial.write(" as runtime from adress ");
@@ -223,6 +264,7 @@ while(true) {
       Serial.print(eeprom_read_byte((uint8_t*) (adress+2)) ^ 
                    calc_parity_value(&timings[i]));
       Serial.write(" as parity check. \n");
+      #endif
 
     }
   }
@@ -234,3 +276,47 @@ while(true) {
             highByte(input->stopTime);
   }
 
+  void power_off(){
+    noInterrupts();
+    
+    digitalWrite(13, HIGH);
+    save_timings_to_eeprom(START_SAVE_ADRESS, (TIMING *) &timings[0]);
+    //save = true;
+    digitalWrite(13, LOW);
+
+    interrupts();
+  }
+
+
+void mcProxySend(byte bb){
+  if (bb >= ESCAPE ) {
+    Serial.write(ESCAPE);
+    Serial.write(bb);
+  } else {
+    Serial.write(bb);
+  }
+}
+
+void mcProxySend(binaryInteger bi){
+  for (byte i = 0; i < 4 ; i ++) {
+       
+        /*
+      Serial.print("Byte: ");
+      Serial.print(i);
+      Serial.print(" = ");
+      Serial.print(bi.binary[i]);
+      bi.binary[i]=0;
+      Serial.print(" Integer = ");
+      Serial.print(bi.integer);
+      Serial.print("END");
+    */
+
+    mcProxySend(bi.binary[i]);
+  }
+}
+
+void mcProxySend(binaryFloat bf){
+  for (byte i = 0 ; i < 4 ; i ++) {
+    mcProxySend(bf.binary[i]);
+  }
+}
