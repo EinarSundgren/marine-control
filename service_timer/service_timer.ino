@@ -1,47 +1,97 @@
 #include <util/crc16.h>
 #include <EEPROM.h>
 #include <avr/eeprom.h>
+#include <Time.h>
 
-#define NUMBER_OF_TIMINGS 0xF
+#define NUMBER_OF_TIMINGS 0x2
 #define WARNING_INTERVAL 0.8
-#define DELAY_CYCLE_MS 6000 //Store the info each minute.
+#define DELAY_CYCLE_MS 4000
 #define DELAY_CYCLE_MINS DELAY_CYCLE_MS/1000/60
 #define MINUTES_PER_HOUR 60
 #define HIGH_CHECKSUM_ADRESS 500
 #define LOW_CHECKSUM_ADRESS 1000
 
-#define ESCAPE 0xFE
-#define START_OF_FRAME 0xFF
-
 #define START_SAVE_ADRESS 0
 //#define UPPER_OFFSET 512
-
-#define MSG_FULL_TIMER_FEFRESH 0x01
 
 #define PIN_INTERNAL_LED 13
 #define PIN_VOLTAGE_SENSE 3
 
+/*
+Protocol defines
+*/
+// Unit ID:s
 #define ID_INTERFACE 0x00
 #define ID_TIMER 0x10
+#define ID_GYRO 0x20
 
+// Protocol stream reading states
+#define READ_TO_BYTE 1
+#define READ_FROM_BYTE 2
+#define READ_MESSAGE_TYPE 3
+#define READ_DATA_LENGTH 4
+#define READ_DATA 5
+#define READ_CRC_BYTE_1 6
+#define READ_CRC_BYTE_2 7
+#define READ_EOF 8
+
+
+//
+#define TIMER_DATA_FIELD_STOP 0x00
+#define TIMER_DATA_FIELD_ELAPSED 0x01
+
+// Bitmasks
+#define ID_TYPE_MASK 0xF0
+#define ID_SUBUNIT_MASK 0x0F
+
+// Inbuffer size
+#define PROTOCOL_DATA_BUFFER_SIZE 24
+
+// Mesage types
+#define MSG_FULL_TIMER_FEFRESH 0x01
+
+// Protocol special characters
+#define ESCAPE 0xF0
+#define START_OF_FRAME 0xFF
+#define END_OF_FRAME 0xFE
+
+/*
+Debug flags
+*/
 #define DEBUG 0
 
 /*
 Defines of lsb and msb for reading and writing to EEPROM and serial.
 */
+
 #define lowByte(w) ((uint8_t) ((w) & 0xff))
 #define highByte(w) ((uint8_t) ((w) >> 8))
 
   typedef union {
     float floatingPoint;
-    byte binary[4];
+    uint8_t binary[4];
   } binaryFloat;
 
   typedef union {
     uint16_t integer;
-    byte binary[4];
+    uint8_t binary[4];
   } binaryInteger;
 
+  typedef struct MCProxyProtocol {
+    uint8_t incomingByte;
+    uint8_t previous_incoming;
+    uint8_t protocolState;
+    uint8_t messageType;
+    uint8_t fromByte;
+    uint8_t toByte;
+    uint8_t datasize;
+    uint8_t data[PROTOCOL_DATA_BUFFER_SIZE];
+    uint8_t crc_1;
+    uint8_t crc_2;
+
+    uint8_t data_read_posion;
+
+  } MC_PROXY_PROTOCOL;
 
   typedef struct ll{  
     uint16_t runTime; //In minutes since last reset
@@ -50,12 +100,12 @@ Defines of lsb and msb for reading and writing to EEPROM and serial.
 
   TIMING timings[NUMBER_OF_TIMINGS];
   TIMING * current = timings;
+  MC_PROXY_PROTOCOL in_data;
   boolean doService;
   boolean planService;
   boolean write_to_upper = false;
+
   uint16_t accumDelay; // Accumulated delay
-  uint16_t incomingByte = 0;   // for incoming serial data
-  //uint16_t * save_adress = START_SAVE_ADRESS
   uint8_t eeprom_checksum;
 
   binaryInteger runTime; //In minutes since last reset
@@ -69,46 +119,53 @@ void setup();
 void change_timing(uint16_t id, uint16_t runTime, uint16_t stopTime);
 void save_timings_to_eeprom(uint16_t * adress, TIMING * input);
 void read_state_from_eeprom(uint16_t * adress); 
-byte calc_parity_value(TIMING * input);
+uint8_t calc_parity_value(TIMING * input);
 
 void mcProxySend(binaryInteger bi);
 void mcProxySend(binaryFloat bf);
-void mcProxySend(byte bb);
+void mcProxySend(uint8_t bb);
 
+void mcProtocolInit(MC_PROXY_PROTOCOL * protocol);
+void process_frame(MC_PROXY_PROTOCOL * protocol);
+void buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming);
 void power_off();
+void serial_in();
 
 int main(void) {
-init();
-setup();
+  init();
+  setup();
+  mcProtocolInit(&in_data);
 
 
  // Just temp before we can calculate it properly.
-byte crc = 0x02;
+  uint8_t crc = 0x02;
 
-while(true) {
+
+
+  unsigned long lastSave = millis();
+  while(true) {
+    current = timings;
+    doService = false;
+    planService = false;
   
-
-  current = timings;
-  doService = false;
-  planService = false;
   
-  /*
-  if (Serial.available() > 0) {
-                // read the incoming byte:
-                incomingByte = Serial.read();
+    // Delay loop for the expected time
+    while (millis()-lastSave<DELAY_CYCLE_MS) {
 
-                // say what you got:
-                Serial.print("I received: ");
-                Serial.println(incomingByte, DEC);
+
+      if (Serial.available()){
+          buffer_protocol(&in_data, Serial.read());
+    } else {
+      
+    }
+
   }
-  */
-  delay(DELAY_CYCLE_MS-accumDelay);
-  
+
+  lastSave = millis();
 
   for (int i = 0; i < NUMBER_OF_TIMINGS; i ++){
-    // Serial.print(i);
     current = &timings[i];
-    current->runTime += DELAY_CYCLE_MINS;
+    current->runTime += 1; //DELAY_CYCLE_MINS;
 
 
     #if 0
@@ -119,12 +176,16 @@ while(true) {
       Serial.write ("\n");
     # else
 
+      // Pack into bytes for serializaition
       runTime.integer = current->runTime;
       stopTime.integer = current->stopTime;
 
-      Serial.write((byte)START_OF_FRAME); //Start of frame
-      byte fromAddress;
-      byte toAddress;
+      //if (Serial){
+      //Serial.println(current->runTime);
+      
+      //Serial.write((byte)START_OF_FRAME); //Start of frame
+      uint8_t fromAddress;
+      uint8_t toAddress;
       fromAddress = i | ID_TIMER;
       toAddress = 0 | ID_INTERFACE;
       mcProxySend(toAddress); // To ID first interface
@@ -135,12 +196,13 @@ while(true) {
       mcProxySend(stopTime); // Payload 2 second bytes
       mcProxySend(crc);
       mcProxySend(crc);
+      Serial.write((uint8_t)END_OF_FRAME); //End of frame
 
     #endif
 
     if (current->runTime >= current->stopTime) {
     
-    #if DEBUG
+    #if 0
       Serial.write("Curr ");
       Serial.print(current->runTime);
       Serial.write(" >= ");
@@ -162,7 +224,7 @@ while(true) {
     delay(1000);              // wait for a second
     digitalWrite(13, LOW);    // set the LED off
     delay(1000);             // wait for a second
-    Serial.write("Do service \n");
+    // Serial.write("Do service \n");
     accumDelay = 2000;
   }
 
@@ -201,6 +263,7 @@ while(true) {
 
     // Set the interrupt for voltage drop on the optocoupler
     attachInterrupt(1, power_off, FALLING);
+
     Serial.begin(115200);
 
     //Just temporary initialization
@@ -287,8 +350,134 @@ while(true) {
     interrupts();
   }
 
+  void serial_in(){
+    digitalWrite(13, HIGH);
+    delay(500);
+    digitalWrite(13, LOW);
+  }
 
-void mcProxySend(byte bb){
+void mcProtocolInit(MC_PROXY_PROTOCOL * protocol) {
+  protocol->protocolState = READ_TO_BYTE;
+  protocol->incomingByte = NULL;
+  protocol->messageType = NULL;
+  protocol->datasize = NULL;
+  protocol->fromByte = NULL;
+  protocol->toByte = NULL;
+  protocol->data_read_posion = 0;
+  for (uint8_t i = 0; i < PROTOCOL_DATA_BUFFER_SIZE; i ++) protocol->data[i]=NULL;
+}
+
+
+void buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming) {
+        protocol->previous_incoming = protocol->incomingByte; 
+        protocol->incomingByte = incoming;
+
+        // Protocol handling
+        switch (protocol->protocolState) {
+          case READ_TO_BYTE:
+            protocol->toByte = protocol->incomingByte;
+
+            if ( (protocol->incomingByte & ID_TYPE_MASK) == ID_TIMER)
+               {
+              protocol->protocolState = READ_FROM_BYTE;
+              } else if ( (protocol->incomingByte & ID_TYPE_MASK) == ID_GYRO) {
+              protocol->protocolState = READ_FROM_BYTE;
+              } else {            
+                protocol->protocolState = READ_TO_BYTE;
+                mcProtocolInit(&in_data);
+              }
+
+          break;
+
+          case READ_FROM_BYTE:
+            protocol->fromByte = protocol->incomingByte;
+            protocol->protocolState = READ_MESSAGE_TYPE;
+          break;
+
+          case READ_MESSAGE_TYPE:
+            protocol->messageType = protocol->incomingByte;
+            protocol->protocolState = READ_DATA_LENGTH;
+          break;
+
+          case READ_DATA_LENGTH:
+            protocol->datasize = protocol->incomingByte;
+            // Check if required datasize is within allowed limits
+            if (protocol->datasize < 1 || protocol->datasize > PROTOCOL_DATA_BUFFER_SIZE) {
+              mcProtocolInit(&in_data);
+            } else {
+              protocol->protocolState = READ_DATA;
+            }
+
+          break;
+
+          case READ_DATA:
+            // Fill the protocol array with data to appropriate size.
+            if (protocol->data_read_posion < protocol->datasize) {
+
+              protocol->data[protocol->data_read_posion] = protocol->incomingByte;
+              protocol->data_read_posion ++;
+              break;
+
+            } else {
+              protocol->protocolState = READ_CRC_BYTE_1;
+            }
+            
+          // NB, no break here!
+
+          case READ_CRC_BYTE_1:
+            protocol->crc_1 = protocol->incomingByte;
+            protocol->protocolState = READ_CRC_BYTE_2;
+          break;
+
+         case READ_CRC_BYTE_2:
+            protocol->crc_2 = protocol->incomingByte;
+            protocol->protocolState = READ_EOF;
+         break;
+
+         case READ_EOF:
+            // If last byte was EOF, process frame and reset. Else just reset.
+            if (protocol->incomingByte == (uint8_t) END_OF_FRAME) {
+              process_frame(&in_data);
+              mcProtocolInit(&in_data);
+            } else {
+              Serial.write("Failed reading frame");
+              Serial.write(END_OF_FRAME);
+              mcProtocolInit(&in_data);
+            }
+         break;
+
+         default:
+            protocol->protocolState = READ_TO_BYTE;
+         break;
+      }
+
+
+}
+
+void process_frame(MC_PROXY_PROTOCOL * protocol) {
+  // Check crc here!
+  // If it is sent to timer...
+  if ( (protocol->toByte & ID_TYPE_MASK) == ID_TIMER)
+      {
+          if (protocol->data[0]==TIMER_DATA_FIELD_STOP) {
+          // Reassembling the two bytes to an 16 bit int.  
+          timings[protocol->toByte & ID_SUBUNIT_MASK].stopTime = (uint16_t) (protocol->data[2] | ((uint16_t)protocol->data[1] << 8));
+          }
+          else if (protocol->data[0] == TIMER_DATA_FIELD_ELAPSED){
+            
+            Serial.write("Changing timing: ");
+            Serial.print(protocol->toByte & ID_SUBUNIT_MASK);
+            Serial.write(" To: ");
+            Serial.println( );
+            Serial.write(END_OF_FRAME);
+            
+            timings[protocol->toByte & ID_SUBUNIT_MASK].runTime = (uint16_t) (protocol->data[2] | ((uint16_t)protocol->data[1] << 8));            
+          } else return;
+      }
+
+}
+
+void mcProxySend(uint8_t bb){
   if (bb >= ESCAPE ) {
     Serial.write(ESCAPE);
     Serial.write(bb);
@@ -298,25 +487,13 @@ void mcProxySend(byte bb){
 }
 
 void mcProxySend(binaryInteger bi){
-  for (byte i = 0; i < 4 ; i ++) {
-       
-        /*
-      Serial.print("Byte: ");
-      Serial.print(i);
-      Serial.print(" = ");
-      Serial.print(bi.binary[i]);
-      bi.binary[i]=0;
-      Serial.print(" Integer = ");
-      Serial.print(bi.integer);
-      Serial.print("END");
-    */
-
+  for (uint8_t i = 0; i < 4 ; i ++) {
     mcProxySend(bi.binary[i]);
   }
 }
 
 void mcProxySend(binaryFloat bf){
-  for (byte i = 0 ; i < 4 ; i ++) {
+  for (uint8_t i = 0 ; i < 4 ; i ++) {
     mcProxySend(bf.binary[i]);
   }
 }

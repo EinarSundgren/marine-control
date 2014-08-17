@@ -1,6 +1,5 @@
 /*
 
-
 ID to 8 bits
   Unit type 4 bits
   Unit sub ID 4 bits
@@ -10,10 +9,10 @@ ID from 8 bits
   Unit sub ID 4 bits
 
 Message type 8 bits
-  State report 0x00 
+  Full timer refresh 0x01 
       predefined values are sent 
   
-  Change single request 0x01
+  Change single request 0x02
       First byte denotes which value to change
       Following predefined bytes the value
 
@@ -22,6 +21,7 @@ Data length 8 bits
 Payload 
 
 CRC
+End of frame Unescaped
 
 Unit codes first 4 bits 
     0x00 = user interface
@@ -43,6 +43,7 @@ Unit codes 4 lsb bits
 */
 #define ESCAPE 0xFE
 #define START_OF_FRAME 0xFF
+#define END_OF_FRAME 0xFD
 typedef union {
   float floatingPoint;
   byte binary[4];
