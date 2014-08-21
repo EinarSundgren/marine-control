@@ -3,7 +3,7 @@
 #include <avr/eeprom.h>
 #include <Time.h>
 
-#define NUMBER_OF_TIMINGS 0x2
+#define NUMBER_OF_TIMINGS 0x20 // 0x20
 #define WARNING_INTERVAL 0.8
 #define DELAY_CYCLE_MS 4000
 #define DELAY_CYCLE_MINS DELAY_CYCLE_MS/1000/60
@@ -440,8 +440,10 @@ void buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming) {
               process_frame(&in_data);
               mcProtocolInit(&in_data);
             } else {
+              #if DEBUG
               Serial.write("Failed reading frame");
               Serial.write(END_OF_FRAME);
+              # endif
               mcProtocolInit(&in_data);
             }
          break;
@@ -459,20 +461,34 @@ void process_frame(MC_PROXY_PROTOCOL * protocol) {
   // If it is sent to timer...
   if ( (protocol->toByte & ID_TYPE_MASK) == ID_TIMER)
       {
-          if (protocol->data[0]==TIMER_DATA_FIELD_STOP) {
+          // If data is adressed to the stopfield...
+          if (protocol->data[0] == TIMER_DATA_FIELD_STOP) {
           // Reassembling the two bytes to an 16 bit int.  
-          timings[protocol->toByte & ID_SUBUNIT_MASK].stopTime = (uint16_t) (protocol->data[2] | ((uint16_t)protocol->data[1] << 8));
+            timings[protocol->toByte & ID_SUBUNIT_MASK].stopTime = (uint16_t) (protocol->data[2] | ((uint16_t)protocol->data[1] << 8));           
+            #if DEBUG
+              Serial.write("Changing stoptime");
+              Serial.print(protocol->toByte & ID_SUBUNIT_MASK);
+              Serial.write(" To: ");
+              Serial.println( );
+              Serial.write(END_OF_FRAME);
+            #endif
           }
           else if (protocol->data[0] == TIMER_DATA_FIELD_ELAPSED){
-            
-            Serial.write("Changing timing: ");
-            Serial.print(protocol->toByte & ID_SUBUNIT_MASK);
-            Serial.write(" To: ");
-            Serial.println( );
-            Serial.write(END_OF_FRAME);
-            
+            #if DEBUG
+              Serial.write("Changing timing: ");
+              Serial.print(protocol->toByte & ID_SUBUNIT_MASK);
+              Serial.write(" To: ");
+              Serial.println( );
+              Serial.write(END_OF_FRAME);
+            #endif
+
             timings[protocol->toByte & ID_SUBUNIT_MASK].runTime = (uint16_t) (protocol->data[2] | ((uint16_t)protocol->data[1] << 8));            
-          } else return;
+          } else 
+            #if DEBUG
+            Serial.write("Nothing...");
+            Serial.write(END_OF_FRAME);
+            #endif
+          return;
       }
 
 }
