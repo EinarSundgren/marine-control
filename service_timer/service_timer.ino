@@ -3,9 +3,9 @@
 #include <avr/eeprom.h>
 #include <Time.h>
 
-#define NUMBER_OF_TIMINGS 0x20 // 0x20
+#define NUMBER_OF_TIMINGS 0x10 // 0x20
 #define WARNING_INTERVAL 0.8
-#define DELAY_CYCLE_MS 4000
+#define DELAY_CYCLE_MS 60000
 #define DELAY_CYCLE_MINS DELAY_CYCLE_MS/1000/60
 #define MINUTES_PER_HOUR 60
 #define HIGH_CHECKSUM_ADRESS 500
