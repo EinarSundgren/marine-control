@@ -1,6 +1,7 @@
 #include <util/crc16.h>
 #include <EEPROM.h>
 #include <avr/eeprom.h>
+#include <avr/wdt.h>
 #include <Time.h>
 
 #define NUMBER_OF_TIMINGS 0x10 // 0x20
@@ -16,7 +17,8 @@
 
 #define PIN_INTERNAL_LED 13
 #define PIN_VOLTAGE_SENSE 3
-
+#define PIN_3_INTERRUPT 1
+#define PIN_SEND_RESET 5
 /*
 Protocol defines
 */
@@ -138,7 +140,12 @@ void mcProxySend(uint8_t bb);
 void mcProtocolInit(MC_PROXY_PROTOCOL * protocol);
 uint8_t process_frame(MC_PROXY_PROTOCOL * protocol);
 uint8_t buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming);
+/*
+Interrupt related functions
+*/
 void power_off();
+void power_back();
+
 void serial_in();
 
 int main(void) {
@@ -165,7 +172,7 @@ int main(void) {
     while (millis()-lastSave<DELAY_CYCLE_MS) {
       if (Serial.available()){
           uint8_t buffer_result = buffer_protocol(&in_data, Serial.read());          
-          // f ay of the changes are updating, resend the data to the serial
+          // fay of the changes are updating, resend the data to the serial
           if (buffer_result == STOPTIME_CHANGED || buffer_result == RUNTIME_CHANGED){
             broadcast_all_timings(timings);
           };
@@ -221,11 +228,15 @@ int main(void) {
   void setup() {         
     pinMode(PIN_INTERNAL_LED, OUTPUT);
     pinMode(PIN_VOLTAGE_SENSE, INPUT);
+    pinMode(PIN_SEND_RESET, OUTPUT);
+    digitalWrite(PIN_SEND_RESET, HIGH);
+    wdt_disable();
 
     // Set the interrupt for voltage drop on the optocoupler
-    attachInterrupt(1, power_off, FALLING);
+    attachInterrupt(PIN_3_INTERRUPT, power_off, FALLING);
 
     Serial.begin(115200);
+    Serial.write("Starting\n");
 
     //Just temporary initialization
   
@@ -247,6 +258,7 @@ int main(void) {
   }
 
   void save_timings_to_eeprom(uint16_t * adress, TIMING * input) {
+    //Serial.write("Saing");
     for (int i = 0; i < NUMBER_OF_TIMINGS; i ++){
      
      adress = (uint16_t *) (i*5);
@@ -277,9 +289,17 @@ int main(void) {
     current = &timings[i];
     current->runTime += DELAY_CYCLE_MINS;
 
+    #if DEBUG
+      Serial.write("Current ");
+      Serial.print(current->runTime);
+      Serial.write(" Stoptime: ");
+      Serial.print(current->stopTime);
+      Serial.write("\n");
+    #endif
+
     if (current->runTime >= current->stopTime) {
     
-    #if 0
+    #if DEBUG
       Serial.write("Curr ");
       Serial.print(current->runTime);
       Serial.write(" >= ");
@@ -319,6 +339,7 @@ void broadcast_all_timings(TIMING * timings){
       uint8_t toAddress;
       fromAddress = i | ID_TIMER;
       toAddress = 0 | ID_INTERFACE;
+
       mcProxySend(toAddress); // To ID first interface
       mcProxySend(fromAddress); // From ID first timer
       mcProxySend(MSG_FULL_TIMER_FEFRESH); // Message type
@@ -365,20 +386,38 @@ void broadcast_all_timings(TIMING * timings){
   }
 
   void power_off(){
-    noInterrupts();
+    #if DEBUG
+    Serial.write("Saving");
+    #endif
+    Serial.write("Saving");
+    // Stop the power down interrupt from recurring.
+    detachInterrupt(PIN_3_INTERRUPT);
     
+
+    noInterrupts();
+    //save_timings_to_eeprom(START_SAVE_ADRESS, (TIMING *) &timings[0]);
+    interrupts();
+
     digitalWrite(13, HIGH);
-    save_timings_to_eeprom(START_SAVE_ADRESS, (TIMING *) &timings[0]);
-    //save = true;
+    attachInterrupt(PIN_3_INTERRUPT, power_back, RISING);
+    // wdt_enable(WDTO_8S);
+    //while(1){delay(100);};
+  }
+
+  void power_back() {
+    Serial.write("Resetting...");
     digitalWrite(13, LOW);
 
-    interrupts();
+     detachInterrupt(PIN_3_INTERRUPT);
+     //attachInterrupt(PIN_3_INTERRUPT, power_off, FALLING);
+     //wdt_enable(WDTO_4S);
+     asm volatile ("  jmp 0");
   }
 
   void serial_in(){
-    digitalWrite(13, HIGH);
+    //digitalWrite(13, HIGH);
     delay(500);
-    digitalWrite(13, LOW);
+    //digitalWrite(13, LOW);
   }
 
 void mcProtocolInit(MC_PROXY_PROTOCOL * protocol) {
