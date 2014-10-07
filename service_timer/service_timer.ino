@@ -70,7 +70,49 @@ int main(void) {
           // fay of the changes are updating, resend the data to the serial
           if (process_result == STOPTIME_CHANGED || process_result == RUNTIME_CHANGED){
            broadcast_all_timings(timings);
-          };
+          } 
+
+          else if (process_result = ECHO_DATA) {
+          digitalWrite(13, HIGH);
+          binaryInteger b_int;
+          binaryFloat b_float;  
+            delay(1000);
+            digitalWrite(13, LOW);
+          Serial.write((uint8_t)START_OF_FRAME); //Start of frame
+          //Serial.print("ECHO");
+          
+          
+          
+          mcProxySendByte(ID_ECHO); // Return to caller
+          mcProxySendByte(ID_ECHO); // From ID first timer
+          mcProxySendByte(MSG_RETURNING_ECHO); // Message type
+          mcProxySendByte(in_data.datasize); // 32 dec Bytes in payload
+          /*
+          b_int.binary[0] = in_data.data[0];
+          b_int.binary[1] = in_data.data[1];
+          b_int.binary[2] = in_data.data[2];
+          b_int.binary[3] = in_data.data[3];
+
+          b_float.binary[0] = in_data.data[4];
+          b_float.binary[1] = in_data.data[5];
+          b_float.binary[2] = in_data.data[6];
+          b_float.binary[3] = in_data.data[7];
+
+
+
+          mcProxySendInt(b_int); // Payload 2 first bytes
+          mcProxySendFloat(b_float); // Payload 2 second bytes
+          mcProxySendByte(
+                              in_data.toByte ^ 
+                              in_data.fromByte ^ 
+                              MSG_RETURNING_ECHO ^ 
+                              (in_data.datasize) 
+                              );
+          mcProxySendByte(0x02);
+          
+          */
+          Serial.write((uint8_t)END_OF_FRAME);
+          }         ;
           
     } else {
       //digitalWrite(13, LOW);
@@ -149,6 +191,7 @@ int main(void) {
   #else
     read_state_from_eeprom((uint16_t*) START_SAVE_ADRESS, timings);
     broadcast_all_timings(timings);
+    //Serial.print("ECHO");
   #endif
   }
 

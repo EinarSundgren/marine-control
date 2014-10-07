@@ -14,6 +14,7 @@ Protocol defines
 #define ID_INTERFACE 0x00
 #define ID_TIMER 0x10
 #define ID_GYRO 0x20
+#define ID_ECHO 0x30
 
 // Protocol stream reading states
 #define READ_TO_BYTE 1
@@ -28,6 +29,7 @@ Protocol defines
 // Process frame returns
 #define RUNTIME_CHANGED 0x00
 #define STOPTIME_CHANGED 0x01
+#define ECHO_DATA 0x02
 #define FAILED_DECODING_FRAME 0xFF
 #define FAILED_READING_FRAME 0xFE
 #define BUFFERING_FRAME 0xFD
@@ -46,6 +48,8 @@ Protocol defines
 
 // Mesage types
 #define MSG_FULL_TIMER_FEFRESH 0x01
+#define MSG_REQUESTING_ECHO 0x10
+#define MSG_RETURNING_ECHO 0x11
 
 // Protocol special characters
 #define ESCAPE 0xF0
@@ -80,7 +84,9 @@ Protocol defines
 
   } MC_PROXY_PROTOCOL;
 
+// Send all timing information to serial line
 void broadcast_all_timings(TIMING * timings);
+
 
 // Send and receive the datatypes through the proxy properly escaped.
 void mcProxySendInt(binaryInteger bi);
@@ -95,6 +101,7 @@ uint8_t buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming);
 
 //Act on complete frame
 uint8_t process_frame(MC_PROXY_PROTOCOL * protocol, TIMING * timings);
+
 
 
 #endif

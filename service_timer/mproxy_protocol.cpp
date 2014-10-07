@@ -26,17 +26,6 @@ void broadcast_all_timings(TIMING * timings){
       // Fill it with the new curent values
       runTime.integer = timings[i].runTime;
       stopTime.integer = timings[i].stopTime;
-
-      /*
-      Serial.print("Runtime:  ");
-      Serial.print(runTime.integer);
-      Serial.print(" Stoptime:  ");
-      Serial.print(stopTime.integer);
-      */
-
-
-      //if (Serial){
-      //Serial.println(current->runTime);
       
       uint8_t fromAddress;
       uint8_t toAddress;
@@ -79,6 +68,7 @@ void mcProtocolInit(MC_PROXY_PROTOCOL * protocol) {
 
 uint8_t buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming) {
 
+//digitalWrite(13, HIGH);
         protocol->previous_incoming = protocol->incomingByte; 
         protocol->incomingByte = incoming;
         uint8_t result = BUFFERING_FRAME;
@@ -176,11 +166,14 @@ uint8_t buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming) {
 }
 
 uint8_t process_frame(MC_PROXY_PROTOCOL * protocol, TIMING * timings) {
+  digitalWrite(13, LOW);
   uint8_t result;
   // Check crc here!
   // If it is sent to timer...
-  if ((protocol->toByte & ID_TYPE_MASK) == ID_TIMER)
-      {
+
+  switch (protocol->toByte & ID_TYPE_MASK) {
+  
+  case ID_TIMER: 
           // If data is adressed to the stopfield...
           if (protocol->data[0] == TIMER_DATA_FIELD_STOP) {
           // Reassembling the two bytes to an 16 bit int.  
@@ -204,14 +197,29 @@ uint8_t process_frame(MC_PROXY_PROTOCOL * protocol, TIMING * timings) {
             #endif
             result = RUNTIME_CHANGED;
             timings[protocol->toByte & ID_SUBUNIT_MASK].runTime = (uint16_t) (protocol->data[2] | ((uint16_t)protocol->data[1] << 8));            
-          } else 
+            }
+          break;
+
+        case ID_ECHO:
+          //binaryInteger b_int;
+          //binaryFloat b_float; 
+          
+          result = ECHO_DATA;          
+        
+
+        break;
+
+          default: 
             #if DEBUG
             Serial.write("Nothing...");
             Serial.write(END_OF_FRAME);
             #endif
             result = FAILED_DECODING_FRAME;
+          break;
+        }
+
           return result;
-      }
+    
 
 }
 
