@@ -68,17 +68,22 @@ void mcProtocolInit(MC_PROXY_PROTOCOL * protocol) {
 
 uint8_t buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming) {
 
-//digitalWrite(13, HIGH);
+    // TODO: Implement a timeout so that it won't wait to long.
         protocol->previous_incoming = protocol->incomingByte; 
         protocol->incomingByte = incoming;
         uint8_t result = BUFFERING_FRAME;
-
         // Protocol handling
+
+                        
+
+
+
         switch (protocol->protocolState) {
           case READ_TO_BYTE:
-
-
             protocol->toByte = protocol->incomingByte;
+
+            // Make sure it is sent to a valid unit
+            // If so set protocol state to next.  
 
             if ( (protocol->incomingByte & ID_TYPE_MASK) == ID_TIMER)
                {
@@ -89,7 +94,10 @@ uint8_t buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming) {
               protocol->protocolState = READ_FROM_BYTE;
               } else if ( (protocol->incomingByte & ID_TYPE_MASK) == ID_GYRO) {
               protocol->protocolState = READ_FROM_BYTE;
-              } else {            
+              } else if ( (protocol->incomingByte & ID_TYPE_MASK) == ID_ECHO) {
+              protocol->protocolState = READ_FROM_BYTE;
+              }
+              else {
                 protocol->protocolState = READ_TO_BYTE;
                 mcProtocolInit(protocol);
               }
@@ -108,6 +116,7 @@ uint8_t buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming) {
 
           case READ_DATA_LENGTH:
             protocol->datasize = protocol->incomingByte;
+
             // Check if required datasize is within allowed limits
             if (protocol->datasize < 1 || protocol->datasize > PROTOCOL_DATA_BUFFER_SIZE) {
               mcProtocolInit(protocol);
@@ -118,7 +127,7 @@ uint8_t buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming) {
           break;
 
           case READ_DATA:
-            // Fill the protocol array with data to appropriate size.
+            // Fill the protocol array with data to the given size.
             if (protocol->data_read_posion < protocol->datasize) {
 
               protocol->data[protocol->data_read_posion] = protocol->incomingByte;
@@ -145,6 +154,8 @@ uint8_t buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming) {
             // If last byte was EOF, process frame and reset. Else just reset.
             if (protocol->incomingByte == (uint8_t) END_OF_FRAME) {
               result = FULL_FRAME_BUFFERED;
+                        digitalWrite(13, HIGH);
+
               // Assuming that the next function takes care of clearing the protocol buffer
 
 
@@ -166,10 +177,13 @@ uint8_t buffer_protocol(MC_PROXY_PROTOCOL * protocol, uint8_t incoming) {
 }
 
 uint8_t process_frame(MC_PROXY_PROTOCOL * protocol, TIMING * timings) {
-  digitalWrite(13, LOW);
-  uint8_t result;
+
+  uint8_t result = NO_PROCESS_RESULT;
   // Check crc here!
   // If it is sent to timer...
+
+
+  while(result == NO_PROCESS_RESULT ){
 
   switch (protocol->toByte & ID_TYPE_MASK) {
   
@@ -204,8 +218,7 @@ uint8_t process_frame(MC_PROXY_PROTOCOL * protocol, TIMING * timings) {
           //binaryInteger b_int;
           //binaryFloat b_float; 
           
-          result = ECHO_DATA;          
-        
+          result = ECHO_DATA;
 
         break;
 
@@ -215,8 +228,11 @@ uint8_t process_frame(MC_PROXY_PROTOCOL * protocol, TIMING * timings) {
             Serial.write(END_OF_FRAME);
             #endif
             result = FAILED_DECODING_FRAME;
+
+
           break;
-        }
+        } // end switch
+     } // End while
 
           return result;
     

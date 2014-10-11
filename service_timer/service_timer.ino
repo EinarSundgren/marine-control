@@ -53,31 +53,45 @@ int main(void) {
     //doService = false;
     //planService = false;
   
+  //delay(200); digitalWrite(13, LOW);
+    //        digitalWrite(13, HIGH); delay(200); digitalWrite(13, LOW);
   
     // Delay loop for the expected time
-   
-    while (millis()-lastSave<DELAY_CYCLE_MS) {
+   int counter = 0;
+    while (millis()-lastSave < DELAY_CYCLE_MS) {
       if (Serial.available()){
+         
         //digitalWrite(13, HIGH);
+            
           uint8_t buffer_result = buffer_protocol(&in_data, Serial.read());
-          uint8_t process_result;
+          uint8_t process_result = BUFFERING_FRAME;
 
+          // Full frame is buffered. Do somethig with the data
           if (buffer_result == FULL_FRAME_BUFFERED) { 
+
+                        digitalWrite(13, HIGH);
+                        delay(200);
+                        digitalWrite(13, LOW);
+                        delay(200);
+                        digitalWrite(13, HIGH);
+                        delay(200);
+                        digitalWrite(13, LOW);
+
+
                 process_result = process_frame(&in_data, timings);
-                mcProtocolInit(&in_data);
-            }
+                
+
 
           // fay of the changes are updating, resend the data to the serial
           if (process_result == STOPTIME_CHANGED || process_result == RUNTIME_CHANGED){
            broadcast_all_timings(timings);
           } 
 
-          else if (process_result = ECHO_DATA) {
-          digitalWrite(13, HIGH);
+          else if (process_result == ECHO_DATA) {
           binaryInteger b_int;
           binaryFloat b_float;  
-            delay(1000);
-            digitalWrite(13, LOW);
+          
+            
           Serial.write((uint8_t)START_OF_FRAME); //Start of frame
           //Serial.print("ECHO");
           
@@ -86,8 +100,10 @@ int main(void) {
           mcProxySendByte(ID_ECHO); // Return to caller
           mcProxySendByte(ID_ECHO); // From ID first timer
           mcProxySendByte(MSG_RETURNING_ECHO); // Message type
-          mcProxySendByte(in_data.datasize); // 32 dec Bytes in payload
-          /*
+          mcProxySendByte(
+            in_data.datasize
+          ); // Bytes in payload
+          
           b_int.binary[0] = in_data.data[0];
           b_int.binary[1] = in_data.data[1];
           b_int.binary[2] = in_data.data[2];
@@ -101,6 +117,7 @@ int main(void) {
 
 
           mcProxySendInt(b_int); // Payload 2 first bytes
+          
           mcProxySendFloat(b_float); // Payload 2 second bytes
           mcProxySendByte(
                               in_data.toByte ^ 
@@ -110,10 +127,16 @@ int main(void) {
                               );
           mcProxySendByte(0x02);
           
-          */
-          Serial.write((uint8_t)END_OF_FRAME);
-          }         ;
           
+          Serial.write((uint8_t)END_OF_FRAME);
+          //digitalWrite(13, LOW);
+          };
+          // Reset the protocol in buffer
+          mcProtocolInit(&in_data);  
+            }
+
+
+        
     } else {
       //digitalWrite(13, LOW);
     }

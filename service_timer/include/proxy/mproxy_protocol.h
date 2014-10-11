@@ -27,11 +27,15 @@ Protocol defines
 #define READ_EOF 8
 
 // Process frame returns
+
 #define RUNTIME_CHANGED 0x00
 #define STOPTIME_CHANGED 0x01
 #define ECHO_DATA 0x02
-#define FAILED_DECODING_FRAME 0xFF
+
+#define NO_PROCESS_RESULT 0xFD
 #define FAILED_READING_FRAME 0xFE
+#define FAILED_DECODING_FRAME 0xFF
+
 #define BUFFERING_FRAME 0xFD
 #define FULL_FRAME_BUFFERED 0xFC
 
