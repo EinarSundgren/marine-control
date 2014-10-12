@@ -104,15 +104,15 @@ int main(void) {
             in_data.datasize
           ); // Bytes in payload
           
-          b_int.binary[0] = in_data.data[0];
-          b_int.binary[1] = in_data.data[1];
-          b_int.binary[2] = in_data.data[2];
-          b_int.binary[3] = in_data.data[3];
+          b_int.binary[0] = in_data.data[3];
+          b_int.binary[1] = in_data.data[2];
+          b_int.binary[2] = in_data.data[1];
+          b_int.binary[3] = in_data.data[0];
 
-          b_float.binary[0] = in_data.data[4];
-          b_float.binary[1] = in_data.data[5];
-          b_float.binary[2] = in_data.data[6];
-          b_float.binary[3] = in_data.data[7];
+          b_float.binary[0] = in_data.data[7];
+          b_float.binary[1] = in_data.data[6];
+          b_float.binary[2] = in_data.data[5];
+          b_float.binary[3] = in_data.data[4];
 
 
 
@@ -200,7 +200,7 @@ int main(void) {
     // Set the interrupt for voltage drop on the optocoupler
     attachInterrupt(PIN_3_INTERRUPT, power_off, FALLING);
 
-    Serial.begin(9600);
+    Serial.begin(19200);
     //Serial.write("Starting\n");
 
     //Just temporary initialization
